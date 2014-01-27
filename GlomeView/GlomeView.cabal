@@ -1,0 +1,27 @@
+Name:                GlomeView
+Version:             0.2
+Synopsis:            SDL Frontend for Glome ray tracer
+Description:         Ray Tracer capable of rendering a variety of primitives,
+                     with support for CSG (difference and intersection of solids),
+                     BIH-based acceleration structure, and ability to load NFF
+                     format files.  The rendering algorithms have been abstracted
+                     to an external library, GlomeTrace.  This is just a front-end
+                     to the library that renders scenes into an SDL window.
+License:             GPL
+License-file:        LICENSE
+Author:              Jim Snow
+Maintainer:          Jim Snow <jsnow@cs.pdx.edu>
+Copyright:           Copyright 2008,2010 Jim Snow
+Homepage:            http://haskell.org/haskellwiki/Glome
+Stability:           experimental
+Category:            graphics
+Build-Depends:       base >= 4, haskell2010, time, monad-par, deepseq, random, array, GlomeVec, GlomeTrace
+build-type:          Simple
+Cabal-Version: >= 1.2
+extra-source-files:  README.txt,TestScene.hs
+
+Executable Glome
+  Main-Is:        Glome.hs
+  ghc-options: -O2 -threaded
+  extensions:          BangPatterns
+  Build-Depends:       base >= 4, time, monad-par, deepseq, random, vector, GlomeVec, GlomeTrace, SDL
