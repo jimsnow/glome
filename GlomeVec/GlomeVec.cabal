@@ -1,0 +1,24 @@
+Name:                GlomeVec
+Version:             0.2
+Synopsis:            Simple 3D vector library
+Description:         A simple library for dealing with 3D vectors, suitable for graphics projects.  A small texture library with Perlin noise is included as well.
+License:             GPL
+License-file:        LICENSE
+Author:              Jim Snow
+Maintainer:          Jim Snow <jsnow@cs.pdx.edu>
+Copyright:           Copyright 2008,2009,2014 Jim Snow
+Homepage:            http://www.haskell.org/haskellwiki/Glome
+Stability:           experimental
+Category:            graphics
+build-type:          Simple
+Cabal-Version: >= 1.2
+extra-source-files:
+  README.txt
+library
+  ghc-options: -fllvm -O2 -funbox-strict-fields
+  extensions: UnboxedTuples
+  ghc-prof-options: -prof -auto-all
+
+  exposed-modules:   Data.Glome.Vec
+                     Data.Glome.Texture
+  Build-Depends:     base >= 4 && < 5, array
