@@ -15,13 +15,12 @@ Copyright:           Copyright 2008,2010 Jim Snow
 Homepage:            http://haskell.org/haskellwiki/Glome
 Stability:           experimental
 Category:            graphics
-Build-Depends:       base >= 4, haskell2010, time, monad-par, deepseq, random, array, GlomeVec, GlomeTrace
 build-type:          Simple
-Cabal-Version: >= 1.2
+Cabal-Version: >= 1.2.3
 extra-source-files:  README.txt,TestScene.hs
 
 Executable Glome
   Main-Is:        Glome.hs
   ghc-options: -O2 -threaded
   extensions:          BangPatterns
-  Build-Depends:       base >= 4, time, monad-par, deepseq, random, vector, GlomeVec, GlomeTrace, SDL
+  Build-Depends:       base >= 4 && < 5, time, monad-par, deepseq, random, vector, GlomeVec, GlomeTrace, SDL

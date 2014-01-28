@@ -11,7 +11,7 @@ Homepage:            http://www.haskell.org/haskellwiki/Glome
 Stability:           experimental
 Category:            graphics
 build-type:          Simple
-Cabal-Version: >= 1.2
+Cabal-Version: >= 1.2.3
 extra-source-files:
   README.txt
 library
