@@ -28,6 +28,8 @@ THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 {-# OPTIONS_GHC -funbox-strict-fields #-}
 {-# LANGUAGE BangPatterns #-}
+{-# LANGUAGE FlexibleInstances #-}
+{-# LANGUAGE MultiParamTypeClasses #-}
 
 module Data.Glome.Bih (bih) where
 import Data.Glome.Vec
@@ -38,15 +40,15 @@ import Data.List hiding (group) -- for "partition"
 -- Bounding Interval Heirarchy
 -- http://en.wikipedia.org/wiki/Bounding_interval_hierarchy
 
-data Bih = Bih {bihbb :: Bbox, bihroot :: BihNode} deriving Show
-data BihNode = BihLeaf !SolidItem 
+data Bih t m = Bih {bihbb :: Bbox, bihroot :: BihNode t m} deriving Show
+data BihNode t m = BihLeaf !(SolidItem t m) 
              | BihBranch {lmax :: !Flt, rmin :: !Flt, ax :: !Int, 
-                          l :: BihNode, r :: BihNode} deriving Show
+                          l :: BihNode t m, r :: BihNode t m} deriving Show
 
 -- bih construction
 -- create a leaf node from a list of objects
 -- we use "group" so we can treat a bunch of objects as a single object
-build_leaf :: [(Bbox, SolidItem)] -> BihNode
+build_leaf :: [(Bbox, SolidItem t m)] -> BihNode t m
 build_leaf objs =
  BihLeaf (group (map snd objs))
 
@@ -55,7 +57,7 @@ build_leaf objs =
 
 -- this doesn't seem to be much of a win
 
-optimality :: [(Bbox, SolidItem)] -> Bbox -> Flt
+optimality :: [(Bbox, SolidItem t m)] -> Bbox -> Flt
 optimality objs bb =
  let bbsurf = bbsa bb
      go [] accbb = accbb
@@ -81,7 +83,7 @@ max_bih_sa = 0.4 :: Flt
 -- of small ones, we create one branch with big objects and the other with small
 -- objects, instead of sorting by location.
 
-build_rec :: [(Bbox,SolidItem)] -> Bbox -> Bbox -> Int -> BihNode
+build_rec :: [(Bbox, SolidItem t m)] -> Bbox -> Bbox -> Int -> BihNode t m
 build_rec objs nodebox@(Bbox nodeboxp1 nodeboxp2) splitbox@(Bbox splitboxp1 splitboxp2) depth = 
 
  if (length (take 3 objs) < 2) -- && (optimality objs nodebox) > 0.2
@@ -141,7 +143,7 @@ build_rec objs nodebox@(Bbox nodeboxp1 nodeboxp2) splitbox@(Bbox splitboxp1 spli
 --
 -- See http://en.wikipedia.org/wiki/Bounding_interval_hierarchy
 
-bih :: [SolidItem] -> SolidItem
+bih :: [SolidItem t m] -> SolidItem t m
 bih [] = SolidItem Void
 -- bih (sld:[]) = sld  -- sometimes we'd like to be able to use a
                        -- single object bih just for its aabb
@@ -159,11 +161,11 @@ bih slds =
    SolidItem (Bih bb root)
 
 -- Standard ray traversal.
-rayint_bih' :: Bih -> Ray -> Flt -> Texture -> Rayint 
-rayint_bih' (Bih bb root) !r@(Ray orig dir) !d t =
+rayint_bih' :: Bih tag mat -> Ray -> Flt -> [Texture tag mat] -> [tag] -> Rayint tag mat
+rayint_bih' (Bih bb root) !r@(Ray orig dir) !d t tags =
  let !dir_rcp = vrcp dir
      Interval !near !far = bbclip r bb
-     traverse (BihLeaf !s) !near !far = rayint s r (fmin d far) t
+     traverse (BihLeaf !s) !near !far = rayint s r (fmin d far) t tags
      traverse (BihBranch !lsplit !rsplit !axis !l !r) near far =
        let !dirr = va dir_rcp axis
            !o    = va orig axis
@@ -193,16 +195,16 @@ rayint_bih' (Bih bb root) !r@(Ray orig dir) !d t =
  in
   traverse root near far
 
-miss :: Rayint
+miss :: Rayint tag mat
 miss = RayMiss
 
 -- Optimized traversal.  There's an allocation happening somewhere in here
 -- that I haven't been able to eradicate.
-rayint_bih :: Bih -> Ray -> Flt -> Texture -> Rayint 
-rayint_bih (Bih !bb !root) !r !d t =
+rayint_bih :: Bih tag mat -> Ray -> Flt -> [Texture tag mat] -> [tag] -> Rayint tag mat
+rayint_bih (Bih !bb !root) !r !d t tags =
   let (# near, far #) = {-# SCC bih_rayint_clip #-} bbclip_ub r bb
       (# ox, oy, oz, dx, dy, dz #) = {-# SCC bih_rayint_ray #-} ray_ub r
-      traverse (BihLeaf !s) !near !far = {-# SCC bih_rayint_leaf #-} rayint s r far t
+      traverse (BihLeaf !s) !near !far = {-# SCC bih_rayint_leaf #-} rayint s r far t tags
       traverse (BihBranch !lsplit !rsplit !axis l r) !near !far =
         {-# SCC bih_rayint_branch #-}
         let (# !dirr, !o #) = {-# SCC bih_rayint_case #-} (case axis of 0 -> (# 1/dx, ox #)
@@ -238,11 +240,11 @@ rayint_bih (Bih !bb !root) !r !d t =
 
 -- Ray traversal with debug counter.  The counter gets incremented
 -- when we hit a box.
-rayint_debug_bih :: Bih -> Ray -> Flt -> Texture -> (Rayint,Int) 
-rayint_debug_bih (Bih bb root) r@(Ray orig dir) d t =
+rayint_debug_bih :: Bih tag mat -> Ray -> Flt -> [Texture tag mat] -> [tag] -> (Rayint tag mat, Int) 
+rayint_debug_bih (Bih bb root) r@(Ray orig dir) d t tags =
  let !dir_rcp = vrcp dir
      Interval !near !far = bbclip r bb
-     traverse (BihLeaf !s) !near !far = rayint_debug s r (fmin d far) t
+     traverse (BihLeaf !s) !near !far = rayint_debug s r (fmin d far) t tags
      traverse (BihBranch !lsplit !rsplit !axis !l !r) near far =
        let dirr = va dir_rcp axis
            o    = va orig axis
@@ -288,12 +290,12 @@ rayint_debug_bih (Bih bb root) r@(Ray orig dir) d t =
 -- we act as though they all do.  For that reason,
 -- this only works well with coherent rays.
 
-packetint_bih :: Bih -> Ray -> Ray -> Ray -> Ray -> Flt -> Texture -> PacketResult
+packetint_bih :: Bih tag mat -> Ray -> Ray -> Ray -> Ray -> Flt -> [Texture tag mat] -> [tag] -> PacketResult tag mat
 packetint_bih bih@(Bih bb root) 
               !r1@(Ray orig1 dir1) 
               !r2@(Ray orig2 dir2) 
               !r3@(Ray orig3 dir3) 
-              !r4@(Ray orig4 dir4) !d t =
+              !r4@(Ray orig4 dir4) !d t tags =
  let !dir_rcp1 = vrcp dir1
      !dir_rcp2 = vrcp dir2
      !dir_rcp3 = vrcp dir3
@@ -305,10 +307,10 @@ packetint_bih bih@(Bih bb root)
            veqsign dir_rcp1 dir_rcp3 &&
            veqsign dir_rcp1 dir_rcp4
   then
-   PacketResult (rayint bih r1 d t)
-                (rayint bih r2 d t)
-                (rayint bih r3 d t)
-                (rayint bih r4 d t)
+   PacketResult (rayint bih r1 d t tags)
+                (rayint bih r2 d t tags)
+                (rayint bih r3 d t tags)
+                (rayint bih r4 d t tags)
   else 
    let Interval !near1 !far1 = bbclip r1 bb
        Interval !near2 !far2 = bbclip r2 bb
@@ -318,7 +320,7 @@ packetint_bih bih@(Bih bb root)
        !near = fmin4 near1 near2 near3 near4
        !far =  fmax4 far1  far2  far3  far4
 
-       traverse (BihLeaf !s) !near !far = packetint s r1 r2 r3 r4 (fmin d far) t
+       traverse (BihLeaf !s) !near !far = packetint s r1 r2 r3 r4 (fmin d far) t tags
        traverse (BihBranch !lsplit !rsplit !axis !l !r) !near !far =
            if near > far 
            then packetmiss
@@ -370,7 +372,7 @@ packetint_bih bih@(Bih bb root)
    in
     traverse root near far
 
-shadow_bih :: Bih -> Ray -> Flt -> Bool
+shadow_bih :: Bih m t -> Ray -> Flt -> Bool
 shadow_bih (Bih bb root) r@(Ray orig@(Vec ox oy oz) dir@(Vec dx dy dz)) d =
  let -- !dir_rcp = vrcp dir
      (# near, far' #) = bbclip_ub r bb
@@ -410,7 +412,7 @@ shadow_bih (Bih bb root) r@(Ray orig@(Vec ox oy oz) dir@(Vec dx dy dz)) d =
 -- We test if the point is inside any of the objects contained in
 -- the bih.
 
-inside_bih :: Bih -> Vec -> Bool
+inside_bih :: Bih t m -> Vec -> Bool
 inside_bih (Bih (Bbox (Vec !x1 !y1 !z1) (Vec !x2 !y2 !z2)) root) pt@(Vec !x !y !z) =
  let traverse (BihLeaf !s) = inside s pt
      traverse (BihBranch !lsplit !rsplit !axis !l !r) =
@@ -427,17 +429,37 @@ inside_bih (Bih (Bbox (Vec !x1 !y1 !z1) (Vec !x2 !y2 !z2)) root) pt@(Vec !x !y !
   (y > y1) && (y < y2) && 
   (z > z1) && (z < z2) && (traverse root)
 
+get_metainfo_bih (Bih (Bbox (Vec !x1 !y1 !z1) (Vec !x2 !y2 !z2)) root) pt@(Vec !x !y !z) =
+ let traverse (BihLeaf !s) = get_metainfo s pt
+     traverse (BihBranch !lsplit !rsplit !axis !l !r) =
+       let o = va pt axis
+       in (if o < lsplit
+           then (traverse l)
+           else ([],[])) 
+          `paircat`
+          (if o > rsplit 
+           then (traverse r)
+           else ([],[]))
+ in
+  if (x > x1) && (x < x2) && 
+     (y > y1) && (y < y2) && 
+     (z > z1) && (z < z2)
+  then
+    (traverse root)
+  else
+    ([],[])
+
 -- We already have a bounding box computed.
-bound_bih :: Bih -> Bbox
+bound_bih :: Bih t m -> Bbox
 bound_bih (Bih bb root) = bb
 
-primcount_bih :: Bih -> Pcount
+primcount_bih :: Bih t m -> Pcount
 primcount_bih (Bih bb root) = pcadd (bihcount root) pcsinglebound
  where bihcount (BihLeaf s) = primcount s
        bihcount (BihBranch _ _ _ l r) = 
         pcadd (pcadd (bihcount l) (bihcount r)) pcsinglebound
 
-instance Solid Bih where
+instance Solid (Bih t m) t m where
  rayint = rayint_bih
  rayint_debug = rayint_debug_bih
  packetint = packetint_bih
@@ -445,3 +467,4 @@ instance Solid Bih where
  inside = inside_bih
  bound = bound_bih
  primcount = primcount_bih
+ get_metainfo = get_metainfo_bih

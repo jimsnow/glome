@@ -5,38 +5,23 @@ module Data.Glome.Trace where
 import Data.Glome.Scene
 import Data.List
 
-{-
-We put lighting code in this file because it needs to be 
-mutually recursive with the trace function, for refraction
-and reflection.
- -}
+-- The complex type here allows us to do some precomputation of values that we
+-- might need in layered textures that we don't want to computer over again.
+-- For instance, if we have multiple textures we probably don't want to
+-- re-compute the lighting.
+-- We need a separate shader for a miss because in that case there are no
+-- materials.
+
+data Shader t m ctxa ctxb = Shader {
+  preshade  :: ctxa -> Ray -> SolidItem t m -> Rayint t m -> ctxb,
+  postshade :: ctxa -> ctxb -> m -> Ray -> SolidItem t m -> Rayint t m -> Int -> (ColorA, [t]),
+  missshade :: ctxa -> Ray -> SolidItem t m -> (ColorA, [t])
+}
 
 -- | Result of tracing a packet of 4 rays at once.
 data PacketColor = PacketColor !Color !Color !Color !Color
 
 {-
-class (Show a) => Shader a where
- -- ray intersection, scene, recursion limit
- shade :: Rayint -> Ray -> Scene -> Int -> Color
- shadepacket :: PacketResult -> Ray -> Ray -> Ray -> Ray -> Scene -> Int -> PacketColor
-
- shadepacket (PacketResult ri1 ri2 ri3 ri4) r1 r2 r3 r4 scene recurs =
-  PacketColor (shade ri1 r1 scene recurs)
-              (shade ri2 r2 scene recurs)
-              (shade ri3 r3 scene recurs)
-              (shade ri4 r4 scene recurs)
--}
-
-{-
-simple_shade :: Rayint -> [Light] -> Solid -> Color -> Color
-simple_shade ri lights s bg =
- case ri of
-  (RayHit d p n t) ->
-   let (Material clr refl refr ior kd shine) = t ri
-   in cscale clr (vdot n (Vec 0.0 1.0 0.0))
-  (RayMiss) -> bg
--}
-
 -- set rgb to normal's xyz coordinates
 -- as a debugging aid
 debug_norm_shade :: Rayint -> Ray -> Scene -> Int -> Int -> Color
@@ -53,80 +38,43 @@ flat_shade ri (Ray o indir) scn recurs debug =
   RayHit d p n t -> 
    let (Material clr refl refr ior kd ks shine) = t ri
    in clr
+-}
 
--- | This is the lighting routine that handles diffuse light, shadows, 
--- specular highlights and reflection.  Given a ray intersection, the ray,
--- a scene, and a recursion limit, return a color.  "Debug" is a parameter
--- useful for debugging; sometimes we might want to tint the color by 
--- the number of bounding boxes tested or something similar.
--- Todo: refraction
-shade :: Rayint  -- ^ ray intersection returned by rayint
-      -> Ray     -- ^ ray that resuted in the ray intersection
-      -> Scene   -- ^ scene we're rendering
-      -> Int     -- ^ recursion limit
-      -> Int     -- ^ debugging value (usualy not used)
-      -> Color   -- ^ computed color
-shade ri (Ray o indir) scn recurs !debug = 
- case ri of
-  (RayHit d p n t) ->
-   let (Material clr refl_ refr ior kd ks shine) = t ri
-       s    = sld scn
-       lights = lits scn
-       direct = foldl' cadd c_black 
-                 (map (\ (Light lp lc lexp lrad lshadow) ->
-                   let eyedir = vinvert indir
-                       lvec = vsub lp p
-                       llen = vlen lvec
-                       ldir = vscale lvec (1.0/llen)   
-                       halfangle = bisect ldir eyedir
-                       ldotn  = fmax 0 $ vdot ldir n
-                       blinn = if ks <= delta
-                               then 0
-                               else let b = fmax 0 $ ((vdot halfangle n) ** shine) * ldotn
-                                    in if isNaN b then 0 else b
-                       -- indotn = fmax 0 $ vdot eyedir n
-                       intensity = llen ** lexp
-                       --intensity = 0.2
-                   in
-                    if vdot n lvec < 0 
-                    then c_black
-                    else
-                     if llen > lrad || (lshadow && shadow s (Ray (vscaleadd p n delta) ldir) (llen-(2*delta)))
-                     then c_black
-                     else
-                       (cadd 
-                         -- diffuse
-                         (cmul clr (cscale lc (ldotn * intensity * kd)))
-                         -- blinn/torrance-sparrow  highlight (pbrt p 440)
-                         (cscale lc (blinn * intensity * ks)) ))
-                  lights)
-       reflect_ = 
-         if (refl_ > delta) && (recurs > 0)
-         then let outdir = reflect indir n 
-              in cscale (trace scn 
-                               (Ray (vscaleadd p outdir delta) outdir) 
-                               infinity (recurs-1) ) refl_
-         else c_black
-       refract = 
-         if (refr > delta) && (recurs > 0)
-         then c_black
-         else c_black
-       in
-         cadd direct $ cadd reflect_ refract
+opaque :: ColorA -> Bool
+opaque (ColorA _ _ _ a) = a+delta >= 1
 
-  (RayMiss) -> bground scn
-
--- | Given a scene, a ray, a maximum distance, and a maximum
+-- | Given a scene, a shader, a ray, a maximum distance, and a maximum
 -- recursion depth, test the ray for intersection against 
 -- the object within the scene, then pass the ray intersection
 -- to the shade routine (which may trace secondary rays of its 
 -- own), which returns a color.  For most applications, this is
 -- the entry point into the ray tracer.
-trace :: Scene -> Ray -> Flt -> Int -> Color
-trace scn ray depth recurs =
- let (Scene sld lights cam dtex bgcolor) = scn 
- in shade (rayint sld ray depth dtex) ray scn recurs 0
-         
+trace :: ctxa -> Shader t m ctxa ctxb -> SolidItem t m -> Ray -> Flt -> Int -> (ColorA, [t], Rayint t m)
+trace _ _ _ _ _ 0 = (ca_transparent, [], RayMiss)
+trace ctxa (Shader pre post miss) sld ray depth recurs =
+  let ri  = rayint sld ray depth [] []
+      ctxb = pre ctxa ray sld ri
+  in
+    case ri of
+      RayMiss -> let (c, ts) = miss ctxa ray sld in (c, ts, ri)
+      RayHit _ _ _ _ _ texs tags ->
+        let
+          (c, ts) =
+            foldl
+              (\acc@(colora, tagsa) tex ->
+                if opaque colora
+                then acc
+                else
+                  let (colorb, tagsb) = post ctxa ctxb (tex ray ri) ray sld ri recurs
+                  in
+                     (cafold colora colorb, tagsb ++ tagsa)
+              )
+              (ca_transparent, [])
+              texs
+        in
+          (c, ts++tags, ri)
+
+{-
 -- | Similar to trace, but return depth as well as color.
 -- We might want the depth for post-processing effects.
 trace_depth :: Scene -> Ray -> Flt -> Int -> (Color,Flt)
@@ -171,3 +119,5 @@ trace_packet scn ray1 ray2 ray3 ray4 depth recurs =
                 (shade ri2 ray2 scn recurs 0)
                 (shade ri3 ray3 scn recurs 0)
                 (shade ri4 ray4 scn recurs 0)
+
+-}

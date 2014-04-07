@@ -21,20 +21,30 @@ import TestScene
 
 maxdepth = 3 -- recursion depth for reflection/refraction
 
--- compute ray, invoke trace function, return color
-get_color :: Flt -> Flt -> Scene -> (Scene.Color,Flt)
-get_color x y scn = 
- let (Scene sld lights (Camera pos fwd up right) dtex bgcolor) = scn
+get_rayint :: Flt -> Flt -> Scene -> (Scene.ColorA, [Tag], Rayint Tag M)
+get_rayint x y scn = 
+ let (sld, lights, (Camera pos fwd up right), shader) = scn
      dir = vnorm $ vadd3 fwd (vscale right (-x)) (vscale up y)
      ray = (Ray pos dir) 
  in
-  ((Trace.trace scn ray infinity maxdepth),0)
+    Trace.trace lights shader sld ray infinity maxdepth
 
-get_color' :: Flt -> Flt -> Scene -> (Scene.Color,Flt)
+
+get_color x y scn =
+  let (color, tags, ri) = get_rayint x y scn
+  in (color, 0)                    
+
+get_color' :: Flt -> Flt -> Scene -> (Scene.ColorA,Flt)
 get_color' x y _ =
-  (Scene.Color x y (x+y), 0)
+  (Scene.ColorA x y (x+y) 1, 0)
+
+
+get_tags x y scn =
+  let (color, tags, ri) = get_rayint x y scn
+  in tags
 
 -- compute a 2x2 packet of four rays from corners of box
+{-
 get_packet :: Flt -> Flt -> Flt -> Flt -> Scene -> PacketColor
 get_packet x1 y1 x2 y2 scn =
  let (Scene sld lights (Camera pos fwd up right) dtex bgcolor) = scn
@@ -47,6 +57,7 @@ get_packet x1 y1 x2 y2 scn =
      ray3 = Ray pos dir3
      ray4 = Ray pos dir4
  in trace_packet scn ray1 ray2 ray3 ray4 infinity maxdepth
+-}
 
 cap1 :: Flt -> Flt
 cap1 x
@@ -76,10 +87,6 @@ setPixel32 surf x y (Pixel pixel) = do
     else error "setPixel32 -- bad coordinate"
  where offset = y * (fromIntegral $ surfaceGetPitch surf `div` 4) + x
 
-{-
-renderTile :: Rect -> Surface -> IO ()
-renderTile (Rect xmin xmax width height) (surf = do
-  -}
 
 -- r g b debug index
 data Tile = Tile Rect (UV.Vector (Flt, Flt, Flt, Flt))
@@ -90,6 +97,7 @@ instance NFData Tile where
 
 -- We pass in the Rect for the whole image, and a sub-Rect for the tile
 -- we want to render.
+-- We throw away the alpha value here.
 renderTile :: Rect -> Rect -> Scene -> Tile
 renderTile (Rect _ _ width height) t@(Rect xtmin ytmin twidth theight) scene =
   let widthf = fromIntegral width
@@ -99,7 +107,7 @@ renderTile (Rect _ _ width height) t@(Rect xtmin ytmin twidth theight) scene =
             yf = fromIntegral $ ytmin + (div i twidth)
             xcoord = (((xf/widthf)*2)-1) * (widthf/heightf)
             ycoord = -(((yf/heightf)*2)-1)
-            (Scene.Color r g b, d) = get_color xcoord ycoord scene
+            (ColorA r g b _, d) = get_color xcoord ycoord scene
             --(r,g,b,d) = (0.5, 0, 0, 0)
         in
           (r, g, b, d)
@@ -156,19 +164,39 @@ render surf scene = do
           heightf = fromIntegral height
           xcoord = (((xf/widthf)*2)-1) * (widthf/heightf)
           ycoord = -(((yf/heightf)*2)-1)
-          (Scene.Color r g b, d) = get_color xcoord ycoord scene
+          (ColorA r g b _, d) = get_color xcoord ycoord scene
       in
         do _ <- fillRect surf (Just (Rect x y 1 1)) (rgbf r g b)
            return ()
                        )
                      )
 
-quitHandler :: IO ()
-quitHandler = do
-  e <- waitEvent
+getTags' x y scn =
+  let xf = fromIntegral $ x
+      yf = fromIntegral $ y
+      widthf = fromIntegral xres
+      heightf = fromIntegral yres
+      xcoord = (((xf/widthf)*2)-1) * (widthf/heightf)
+      ycoord = -(((yf/heightf)*2)-1)
+  in  
+      get_tags xcoord ycoord scn
+
+runHandler :: Scene -> IO ()
+runHandler scn = do
+  e <- pollEvent
+  --e <- waitEvent
   case e of
     Quit -> return ()
-    otherwise -> quitHandler
+    MouseButtonUp x y ButtonLeft ->
+      do let ts = getTags' x y scn
+         print $ (show x) ++ " " ++ (show y) ++ ":"
+         forM_ ts print
+         runHandler scn
+    NoEvent ->
+      do delay 50
+         runHandler scn
+    otherwise -> 
+      runHandler scn
 
 main = do
   SDL.init [InitVideo, InitTimer, InitJoystick]
@@ -179,9 +207,9 @@ main = do
   img <- createRGBSurface [HWSurface] xres yres 32 0 0 0 0
 
   setupt1 <- getPOSIXTime
-  scene <- TestScene.scn
+  scene@(geom, _, _, _) <- TestScene.scn
 
-  print $ "(primitives,transforms,bounding objects): " ++ (show (primcount_scene scene))
+  print $ "(primitives,transforms,bounding objects): " ++ (show (primcount geom))
   setupt2 <- getPOSIXTime
   print $ "scene setup: " ++ (show (setupt2-setupt1))
 
@@ -197,4 +225,4 @@ main = do
   blitt2 <- getPOSIXTime
   print $ "blit: " ++ (show (blitt2-blitt1))
 
-  quitHandler
+  runHandler scene

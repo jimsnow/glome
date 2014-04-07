@@ -1,3 +1,6 @@
+{-# LANGUAGE FlexibleInstances #-}
+{-# LANGUAGE MultiParamTypeClasses #-}
+
 module Data.Glome.Bound (bound_object) where
 import Data.Glome.Vec
 import Data.Glome.Solid
@@ -14,7 +17,7 @@ import Data.Glome.Solid
 
 -- The first SolidItem is the bounding object, the second
 -- is the bounded object.
-data Bound = Bound SolidItem SolidItem deriving Show
+data Bound t m = Bound (SolidItem t m) (SolidItem t m) deriving Show
 
 -- | Use the first object as a bounding volume for the second
 -- object.  If a ray misses the first object, it is assumed to
@@ -22,35 +25,41 @@ data Bound = Bound SolidItem SolidItem deriving Show
 -- In general, bih will usually perform better than 
 -- manually-constructed bounds, though.
 
-bound_object :: SolidItem -> SolidItem -> SolidItem
+bound_object :: SolidItem t m -> SolidItem t m -> SolidItem t m
 bound_object a b = SolidItem $ Bound a b
 
-rayint_bound :: Bound -> Ray -> Flt -> Texture -> Rayint
-rayint_bound (Bound sa sb) r d t =
+rayint_bound :: Bound tag mat -> Ray -> Flt -> [Texture tag mat] -> [tag] -> Rayint tag mat
+rayint_bound (Bound sa sb) r d t tags =
  let (Ray orig _) = r
  in if inside sa orig || shadow sa r d
-    then rayint sb r d t
+    then rayint sb r d t tags
     else RayMiss
 
-rayint_debug_bound :: Bound -> Ray -> Flt -> Texture -> (Rayint,Int)
-rayint_debug_bound (Bound sa sb) r d t =
+rayint_debug_bound :: Bound tag mat -> Ray -> Flt -> [Texture tag mat] -> [tag] -> (Rayint tag mat, Int)
+rayint_debug_bound (Bound sa sb) r d t tags =
  let (Ray orig _) = r
  in if inside sa orig || shadow sa r d
-    then (debug_wrap (rayint_debug sb r d t) 1)
+    then (debug_wrap (rayint_debug sb r d t tags) 1)
     else (RayMiss,0)
 
-shadow_bound :: Bound -> Ray -> Flt -> Bool
+shadow_bound :: Bound t m -> Ray -> Flt -> Bool
 shadow_bound (Bound sa sb) r d =
  let (Ray orig _ ) = r
  in if inside sa orig || shadow sa r d
     then shadow sb r d
     else False
 
-inside_bound :: Bound -> Vec -> Bool
+inside_bound :: Bound t m -> Vec -> Bool
 inside_bound (Bound sa sb) pt = inside sa pt && inside sb pt
 
+get_metainfo_bound :: Bound t m -> Vec -> ([Texture t m], [t])
+get_metainfo_bound (Bound sa sb) v =
+  if inside sa v
+  then get_metainfo sb v
+  else ([],[])
+
 -- if this is too slow, we could just take the bounding box for sa
-bound_bound :: Bound -> Bbox
+bound_bound :: Bound t m -> Bbox
 bound_bound (Bound sa sb) = bboverlap (bound sa) (bound sb)
 
 -- remove bounding objects when we flatten transformations
@@ -58,17 +67,17 @@ bound_bound (Bound sa sb) = bboverlap (bound sa) (bound sb)
 -- build an automatic bounding hierarchy rather than
 -- a manual one)
 
-transform_leaf_bound :: Bound -> [Xfm] -> SolidItem
+transform_leaf_bound :: Bound t m -> [Xfm] -> SolidItem t m
 transform_leaf_bound (Bound sa sb) xfms =
  transform_leaf sb xfms
 
-flatten_transform_bound :: Bound -> [SolidItem]
+flatten_transform_bound :: Bound t m -> [SolidItem t m]
 flatten_transform_bound (Bound sa sb) = flatten_transform sb
 
-primcount_bound :: Bound -> Pcount
+primcount_bound :: Bound t m -> Pcount
 primcount_bound (Bound sa sb) = pcadd (asbound (primcount sa)) (primcount sb)
 
-instance Solid Bound where
+instance Solid (Bound t m) t m where
  rayint = rayint_bound
  rayint_debug = rayint_debug_bound
  shadow = shadow_bound
@@ -77,3 +86,4 @@ instance Solid Bound where
  flatten_transform = flatten_transform_bound
  transform_leaf = transform_leaf_bound
  primcount = primcount_bound
+ get_metainfo = get_metainfo_bound

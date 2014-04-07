@@ -1,8 +1,6 @@
 module Data.Glome.Scene (
-    Scene(Scene), Light(Light), Camera(Camera),
-    scene, camera, light, 
-    sld, lits, cam, dtex, bground,
-    primcount_scene,
+    Camera(Camera),
+    camera,
     module Data.Glome.Clr,
     module Data.Glome.Vec,
     module Data.Glome.Solid,
@@ -28,21 +26,10 @@ import Data.Glome.Bound
 import Data.Glome.Cone
 import Data.Glome.Tex
 
--- This is the module to import if you want to have
+-- This is the proper module to import if you want to have
 -- access to all the Solid constructors and scene
 -- defininition code.
 
---LIGHTS--
-data Light = Light {litpos    :: !Vec,
-                    litcol    :: !Color,
-                    litexp    :: !Flt,
-                    litrad    :: !Flt,
-                    litshadow :: !Bool } deriving Show
-
-
--- | Construct a light given a center location and a color.
-light :: Vec -> Color -> Light
-light pos clr = Light pos clr (-2) infinity True
 
 -- CAMERA --
 data Camera = Camera {campos, fwd, up, right :: !Vec} 
@@ -52,7 +39,7 @@ data Camera = Camera {campos, fwd, up, right :: !Vec}
 default_cam = (Camera (vec 0.0 0.0 (-3.0)) 
                       (vec 0.0 0.0 1.0) 
                       (vec 0.0 1.0 0.0) 
-                      (vec 1.0 0.0 0.0) )
+                      (vec 1.0 0.0 0.0))
 
 -- | Construct a camera, given a position, a forward vector, 
 -- a point that the camera should be pointed towards, an up vector,
@@ -69,25 +56,3 @@ camera pos at up angle =
          (vscale up_ cam_scale) 
          (vscale right cam_scale)
 
---SCENE--
-data Scene = Scene {sld     :: SolidItem,
-                    lits    :: [Light], 
-                    cam     :: Camera, 
-                    dtex    :: Texture, 
-                    bground :: Color} deriving Show
-
--- | Create a scene from an item (which can be a composite item, such 
--- as a bih or group), a list of lights, a camera, a default texture,
--- and a default background color.
-scene :: SolidItem -> [Light] -> Camera -> Texture -> Color -> Scene
-scene s l cam t clr = Scene s l cam t clr
-
--- | Count the primitives in the scene.  See docs for primcount 
--- in Solid.hs.
-primcount_scene :: Scene -> Pcount
-primcount_scene (Scene sld _ _ _ _) = primcount sld
-
-{-
-default_scene = (Scene (sphere (vec 0.0 0.0 0.0) 1.0) 
-                       [] default_cam t_white c_white)
--}

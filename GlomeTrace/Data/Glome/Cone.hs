@@ -1,5 +1,7 @@
 {-# OPTIONS_GHC -funbox-strict-fields #-}
 {-# LANGUAGE BangPatterns #-}
+{-# LANGUAGE FlexibleInstances #-}
+{-# LANGUAGE MultiParamTypeClasses #-}
 
 module Data.Glome.Cone (disc, cone, cylinder) where
 import Data.Glome.Vec
@@ -16,26 +18,26 @@ import Data.Glome.Sphere -- for disc bounding box
 
 -- Todo: cylinder shadow test
 
-data Disc = Disc !Vec !Vec !Flt deriving Show -- position, normal, r*r
-data Cylinder = Cylinder !Flt !Flt !Flt deriving Show -- radius height1 height2
-data Cone = Cone !Flt !Flt !Flt !Flt deriving Show -- r clip1 clip2 height
+data Disc t m     = Disc !Vec !Vec !Flt deriving Show -- position, normal, r*r
+data Cylinder t m = Cylinder !Flt !Flt !Flt deriving Show -- radius height1 height2
+data Cone t m     = Cone !Flt !Flt !Flt !Flt deriving Show -- r clip1 clip2 height
 
 -- CONSTRUCTORS --
 
 -- | Create a disc.  These are used as the end-caps on cones and cylinders,
 -- but they can be constructed by themselves as well.
-disc :: Vec -> Vec -> Flt -> SolidItem
+disc :: Vec -> Vec -> Flt -> SolidItem t m
 disc pos norm r =
  SolidItem $ Disc pos norm (r*r)
 
-cylinder_z :: Flt -> Flt -> Flt -> SolidItem
+cylinder_z :: Flt -> Flt -> Flt -> SolidItem t m
 cylinder_z r h1 h2 = SolidItem (Cylinder r h1 h2)
 
-cone_z :: Flt -> Flt -> Flt -> Flt -> SolidItem
+cone_z :: Flt -> Flt -> Flt -> Flt -> SolidItem t m
 cone_z r h1 h2 height = SolidItem (Cone r h1 h2 height)
 
 -- | Construct a general cylinder from p1 to p2 with radius r.
-cylinder :: Vec -> Vec -> Flt -> SolidItem
+cylinder :: Vec -> Vec -> Flt -> SolidItem t m
 cylinder p1 p2 r =
  let axis = vsub p2 p1
      len  = vlen axis
@@ -47,7 +49,7 @@ cylinder p1 p2 r =
                         
 -- | Construct a cone from p1 to p2.  R1 and r2 are the radii at each
 -- end.  A cone need not come to a point at either end.
-cone :: Vec -> Flt -> Vec -> Flt -> SolidItem
+cone :: Vec -> Flt -> Vec -> Flt -> SolidItem t m
 cone p1 r1 p2 r2 =
  if r1 < r2 
  then cone p2 r2 p1 r1
@@ -64,8 +66,8 @@ cone p1 r1 p2 r2 =
                    [ (xyz_to_uvw ax2 ax3 ax1),
                      (translate p1) ]                 
 
-rayint_disc :: Disc -> Ray -> Flt -> Texture -> Rayint
-rayint_disc (Disc point norm radius_sqr) r@(Ray orig dir) d t =
+rayint_disc :: Disc tag mat -> Ray -> Flt -> [Texture tag mat] -> [tag] -> Rayint tag mat
+rayint_disc (Disc point norm radius_sqr) r@(Ray orig dir) d t tags =
  let dist = plane_int_dist r point norm 
  in if dist < 0 || dist > d 
     then RayMiss
@@ -74,9 +76,9 @@ rayint_disc (Disc point norm radius_sqr) r@(Ray orig dir) d t =
          in 
           if (vdot offset offset) > radius_sqr
           then RayMiss
-          else RayHit dist pos norm t
+          else RayHit dist pos norm r vzero t tags
 
-shadow_disc :: Disc -> Ray -> Flt -> Bool
+shadow_disc :: Disc t m -> Ray -> Flt -> Bool
 shadow_disc (Disc point norm radius_sqr) !r@(Ray orig dir) !d =
  let dist = plane_int_dist r point norm 
  in if dist < 0 || dist > d 
@@ -88,19 +90,19 @@ shadow_disc (Disc point norm radius_sqr) !r@(Ray orig dir) !d =
           then False
           else True
 
-bound_disc :: Disc -> Bbox
+bound_disc :: Disc t m -> Bbox
 bound_disc (Disc pos norm rsqr) =
  bound (sphere pos (sqrt rsqr))
 
-instance Solid Disc where
+instance Solid (Disc t m) t m where
  rayint = rayint_disc
  shadow = shadow_disc
  inside (Disc _ _ _) _ = False
  bound = bound_disc
 
 
-rayint_cylinder :: Cylinder -> Ray -> Flt -> Texture -> Rayint
-rayint_cylinder (Cylinder r h1 h2) ray@(Ray orig@(Vec ox oy oz) dir@(Vec dx dy dz)) d t =
+rayint_cylinder :: Cylinder tag mat -> Ray -> Flt -> [Texture tag mat] -> [tag] -> Rayint tag mat
+rayint_cylinder (Cylinder r h1 h2) ray@(Ray orig@(Vec ox oy oz) dir@(Vec dx dy dz)) d t tags =
  let a = dx*dx + dy*dy
      b = 2*(dx*ox + dy*oy)
      c = ox*ox + oy*oy - r*r
@@ -125,33 +127,33 @@ rayint_cylinder (Cylinder r h1 h2) ray@(Ray orig@(Vec ox oy oz) dir@(Vec dx dy d
                  then RayMiss
                  else let pos@(Vec posx posy posz) = vscaleadd orig dir dist
                       in if posz > h1 && posz < h2
-                         then RayHit dist pos (Vec (posx/r) (posy/r) 0) t
+                         then RayHit dist pos (Vec (posx/r) (posy/r) 0) ray vzero t tags
                          else if dz > 0 -- ray pointing up from bottom
                               then if oz < h1
-                                   then rayint_disc (Disc (Vec 0 0 h1) nvz (r*r)) ray d t
+                                   then rayint_disc (Disc (Vec 0 0 h1) nvz (r*r)) ray d t tags
                                    --then rayint_aadisc h1 r ray d t
                                    else RayMiss
                               else if oz > h2
-                                   then rayint_disc (Disc (Vec 0 0 h2) vz (r*r)) ray d t
+                                   then rayint_disc (Disc (Vec 0 0 h2) vz (r*r)) ray d t tags
                                    --rayint_aadisc h2 r ray d t -- todo: fix normal
                                    else RayMiss
 
-inside_cylinder :: Cylinder -> Vec -> Bool
+inside_cylinder :: Cylinder t m -> Vec -> Bool
 inside_cylinder (Cylinder r h1 h2) (Vec x y z) =
  z > h1 && z < h2 && x*x + y*y < r*r
   
-bound_cylinder :: Cylinder -> Bbox
+bound_cylinder :: Cylinder t m -> Bbox
 bound_cylinder (Cylinder r h1 h2) =
  Bbox (Vec (-r) (-r) h1) (Vec r r h2)
 
-instance Solid Cylinder where
+instance Solid (Cylinder t m) t m where
  rayint = rayint_cylinder
  inside = inside_cylinder
  bound = bound_cylinder
 
 
-rayint_cone :: Cone -> Ray -> Flt -> Texture -> Rayint
-rayint_cone (Cone r clip1 clip2 height) ray@(Ray orig@(Vec ox oy oz) dir@(Vec dx dy dz)) d t =
+rayint_cone :: Cone tag mat -> Ray -> Flt -> [Texture tag mat] -> [tag] -> Rayint tag mat
+rayint_cone (Cone r clip1 clip2 height) ray@(Ray orig@(Vec ox oy oz) dir@(Vec dx dy dz)) d t tags =
  let k' = (r/height)
      k = k'*k'
      a = dx*dx + dy*dy - k*dz*dz
@@ -185,15 +187,15 @@ rayint_cone (Cone r clip1 clip2 height) ray@(Ray orig@(Vec ox oy oz) dir@(Vec dx
                              out = height * invhyp
                              r_ = sqrt (posx*posx + posy*posy)
                              correction = (out)/(r_)
-                         in RayHit dist pos (Vec (posx*correction) (posy*correction) up) t
+                         in RayHit dist pos (Vec (posx*correction) (posy*correction) up) ray vzero t tags
                     else 
                      if dz > 0 -- ray pointing up from bottom
                      then if oz < clip1
-                          then rayint_disc (Disc (Vec 0 0 clip1) nvz (r*r)) ray d t
+                          then rayint_disc (Disc (Vec 0 0 clip1) nvz (r*r)) ray d t tags
                           else RayMiss
                      else if oz > clip2
                           then let r2 = r*(1-((clip2-clip1)/(height)))
-                               in rayint_disc (Disc (Vec 0 0 clip2) vz (r2*r2)) ray d t
+                               in rayint_disc (Disc (Vec 0 0 clip2) vz (r2*r2)) ray d t tags
                                    --rayint_aadisc clip2 r2 ray d t
                           else RayMiss
                              -- then rayint_aadisc clip1 r ray d t
@@ -201,7 +203,7 @@ rayint_cone (Cone r clip1 clip2 height) ray@(Ray orig@(Vec ox oy oz) dir@(Vec dx
                                               --   (r*((clip2-clip1)/height)) 
                                                --  (Ray orig dir) d t -- todo: fix normal
 
-shadow_cone :: Cone -> Ray -> Flt -> Bool
+shadow_cone :: Cone t m -> Ray -> Flt -> Bool
 shadow_cone (Cone r clip1 clip2 height) ray@(Ray orig@(Vec ox oy oz) dir@(Vec dx dy dz)) d =
  let k' = (r/height)
      k = k'*k'
@@ -243,16 +245,16 @@ shadow_cone (Cone r clip1 clip2 height) ray@(Ray orig@(Vec ox oy oz) dir@(Vec dx
                           else False
 
 
-inside_cone :: Cone -> Vec -> Bool
+inside_cone :: Cone t m -> Vec -> Bool
 inside_cone (Cone rbase h1 h2 height) (Vec x y z) =
  let r = rbase*(1-(((z-h1)/height)))
  in z > h1 && z < h2 && x*x + y*y < r*r
 
-bound_cone :: Cone -> Bbox
+bound_cone :: Cone t m -> Bbox
 bound_cone (Cone r h1 h2 height) =
  Bbox (Vec (-r) (-r) h1) (Vec r r h2)
 
-instance Solid Cone where
+instance Solid (Cone t m) t m where
  rayint = rayint_cone
  shadow = shadow_cone
  inside = inside_cone

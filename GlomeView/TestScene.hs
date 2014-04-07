@@ -1,10 +1,18 @@
 {-# LANGUAGE ScopedTypeVariables #-}
 
-module TestScene (scn) where
+module TestScene (scn, Scene, Tag, T, M, SI) where
 import Data.Glome.Scene
 import Data.List hiding (group)
 import Data.Glome.Texture
+import Data.Glome.Shader
+import Data.Glome.Trace
 import System.Random
+
+type Tag   = String
+type T     = Texture Tag M
+type M     = Material Tag
+type SI    = SolidItem Tag M
+type Scene = (SI, [Light], Camera, Shader Tag M [Light] [(Color, Vec)])
 
 lights = [ light (Vec (-100) 70 (140)) (cscale (Color 1 0.8 0.8) 7000)
          , light (Vec (-3) 5 8) (cscale (Color 1.5 2 2) 10)
@@ -32,7 +40,7 @@ icosahedron pos r =
                            z <- grrcp]
      pln x = (plane_offset (vnorm x) (r+(vdot (vnorm x) pos)))
  in
-  intersection ((sphere pos (1.26*r)):(map pln points))
+  tag (intersection ((sphere pos (1.26*r)):(map pln points))) "icosahedron"
 
 dodecahedron pos r =
  let gr = (1+(sqrt 5))/2 -- golden ratio, 1.618033988749895
@@ -43,7 +51,7 @@ dodecahedron pos r =
               [Vec x y 0 | x <- n11, y <- ngrgr]
      pln x = (plane_offset (vnorm x) (r+(vdot (vnorm x) pos)))
  in
-  intersection ((sphere pos (1.26*r)):(map pln points))
+  tag (intersection ((sphere pos (1.26*r)):(map pln points))) "dodecahedron"
 
 spiral = [ ((Vec ((sin (rot n))*n) 
                  ((cos (rot n))*n) 
@@ -55,10 +63,9 @@ coil = bih (zipWith (\ (p1,r1) (p2,r2) -> (group [(cone p1 r1 p2 r2),
                     spiral 
                     (tail spiral))
 
-
 -- we branch once per year
 -- not really a plausible oak, but it's getting there
-oak :: Flt -> StdGen -> SolidItem
+oak :: Flt -> StdGen -> SI
 oak age rng = 
  if age < 0 
  then nothing
@@ -100,7 +107,7 @@ oak age rng =
                                                                  (rotate (Vec 0 1 0) (deg 30)),
                                                                  (translate (Vec 0 seglen 0))]
                            ])
-  in tex (bih (tolist (SolidItem (flatten_transform (tree year rng))))) (t_matte (Color 0.8 0.5 0.4)) 
+  in tag (tex (bih (tolist (SolidItem (flatten_transform (tree year rng))))) (t_matte (Color 0.8 0.5 0.4))) "tree"
 
 sphereint = intersection [ (sphere (Vec (-1) 0 0) 2), 
                            (sphere (Vec 1 0 0) 2),
@@ -133,7 +140,7 @@ cust_cam = camera (vec (-2) (4.3) (15)) (vec 0 2 0) (vec 0 1 0) 45
 chessboard =
   group
    [tex
-      (box (vec (x-(1/2)) (-1) (z-(1/2)))
+      (box (vec (x-(1/2)) (-3) (z-(1/2)))
            (vec (x+(1/2)) (f x z) (z+(1/2))))
       (tf x z) | x <- [(-3.5)..3.5], z <- [(-3.5)..3.5]]
   where
@@ -142,8 +149,39 @@ chessboard =
             then t_shiny_white
             else t_mottled
 
+portal height width thickness =
+  let frame =
+        tag 
+          (tex
+            (difference
+              (box (vec (-width) 0 (-thickness))
+                   (vec width height thickness))
+
+              (box (vec (thickness-width) (thickness) (-(thickness+delta)))
+                   (vec (width-thickness) (height-thickness) (thickness+delta))))
+            (t_matte (Color 0.4 0.4 0.8)))
+        "door frame"
+
+      surface =
+        (box (vec (-width) 0 (-delta))
+             (vec (width) (height-delta) delta))
+
+      xfm ray@(Ray origin dir) (RayHit depth pos norm _ _ _ _) =
+        xfm_ray (compose [ rotate vx (deg (-85))
+                         , translate (vec (8) 40 (-4))
+                         ])
+                (Ray pos (vnorm dir))
+
+
+        --Ray (vadd pos (vec 0 15 0)) (vrotate pos (Ray pos vx) (deg 90))
+
+  in group [frame,
+            tex surface (t_uniform (Warp frame geom'' lights xfm))]
+                    
+
+
 geom'' =
-  group
+  bih
    [ difference (transform chessboard [scale (vec 2 1.2 2)]) (tex (sphere (vec 4 1.5 3) 3.5) t_shiny_white)
    , tex (dodecahedron (vec (-6) 3 0) 1) t_stripe
    , tex (transform (icosahedron (Vec 4 1.5 3) 1.5) [ rotate vz (deg 11)
@@ -152,60 +190,61 @@ geom'' =
    , transform (oak 11.4 (mkStdGen 42)) [ scale (Vec 2 2 2), translate (vec 2 (-1) (-8))]
    , tex (difference (transform (lattice) [rotate vz (deg 23),
                                            rotate vx (deg 43),
-                                           scale (vec 3 3 3) ]) (sphere (vec 0 0 0) 17)) t_shiny_red
+                                           scale (vec 3 3 3) ]) (sphere (vec 0 0 0) 32)) t_shiny_red
+   , transform (portal 5 2 (1/3)) [ rotate vy (deg 8)
+                                  , translate (vec (-3) 0.5 (-5))]
    ]
 
 
 -- some textures
-m_shiny_white :: Material
-m_shiny_white = (Material c_white 0.3 0 0 0.7 0.8 10)
+m_shiny_white :: M
+m_shiny_white = (Surface c_white 1 0.2 0.8 0.4 10 False)
 
-m_shiny_red = (Material c_red 0.3 0 0 0.7 0.8 10)
+m_shiny_red = (Surface c_red 1 0.2 0.8 0.4 10 False)
 
-t_shiny_white :: Texture
-t_shiny_white ri = m_shiny_white
+t_shiny_white :: T
+t_shiny_white _ _ = m_shiny_white
 
-t_shiny_red _ = m_shiny_red
+t_shiny_red _ _ = m_shiny_red
 
-m_dull_gray :: Material
-m_dull_gray = (Material (Color 0.4 0.3 0.35) 0 0 0 0.2 0 1)
+m_dull_gray :: M
+m_dull_gray = (Surface (Color 0.4 0.3 0.35) 1 0.2 0.8 0 0 False)
 
-t_mottled (RayHit _ pos norm _) =
+t_mottled _ (RayHit _ pos norm _ _ _ _) =
  --let scale = (stripe (Vec 1 1 1) sine_wave) pos
  let scale = perlin (vscale pos 3)
- in if scale < 0 then error "foo"
+ in if scale < 0 then error "perlin under range"
     else if scale > 1 
-         then error "bar"
-         else m_interp m_mirror (m_matte (Color 0.15 0.3 0.5)) scale
+         then error "perlin over range"
+         else Blend m_mirror (m_matte (Color 0.15 0.3 0.5)) scale
 
 --shouldn't happen
-t_mottled RayMiss = m_shiny_white
+t_mottled _ RayMiss = m_shiny_white
 
-t_stripe (RayHit _ pos norm _) =
+t_stripe :: T
+t_stripe _ (RayHit _ pos norm _ _ _ _) =
  let scale = (stripe (Vec 4 8 5) triangle_wave) pos
- in if scale < 0 then error "foo"
+ in if scale < 0 then error "perlin under range"
     else if scale > 1 
-         then error "bar"
-         else m_interp m_shiny_white m_dull_gray scale
+         then error "perlin over range"
+         else Blend m_shiny_white m_dull_gray scale
 
 --shouldn't happen
-t_stripe RayMiss = m_shiny_white 
+t_stripe _ RayMiss = m_shiny_white 
 
-m_matte :: Color -> Material
-m_matte c = (Material c 0 0 0 1 0 2)
+m_matte :: Color -> M
+m_matte c = (Surface c 1 0.2 1 0 0 False)
 
-t_matte :: Color -> Texture
+t_matte :: Color -> T
 t_matte c = 
- (\ri -> (Material c 0 0 0 1 0 2)) 
+ (\_ _ -> m_matte c)
 
-m_mirror = (Material (Color 0.8 0.8 1) 1 0 0 0.2 0.8 1000)
+m_mirror = (Reflect 0.8)
 t_mirror = 
- (\ri -> m_mirror)
+ (\_ _ -> m_mirror)
 
 c_sky = (Color 0.4 0.5 0.8)
 
 scn :: IO Scene
-scn = return (Scene geom''
-                    lights cust_cam 
-                    (t_matte (Color 0.6 0.5 0.4)) 
-                    (Color 0.2 0.2 0.2))
+scn = return (geom'', lights, cust_cam, materialShader)
+

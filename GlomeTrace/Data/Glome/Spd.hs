@@ -2,6 +2,7 @@
 
 module Data.Glome.Spd where
 import Data.Glome.Scene
+import Data.Glome.Shader
 
 -- NFF file format description:
 -- http://tog.acm.org/resources/SPD/NFF.TXT
@@ -24,6 +25,8 @@ lexcr s =
    [("",s1)] -> lexcr s1
    [("#",s1)] -> lexignore s1
    _ -> t
+
+type SI = SolidItem () (Material ())
 
 data BgColor = BgColor(Color)
 
@@ -131,17 +134,17 @@ instance Read Light where
  readsPrec _ = readsSpdLight
 
 -- "f" red green blue Kd Ks Shine T index_of_refraction
--- data Material = Material {clr :: Color, reflect, refract, ior, kd, ks, shine :: Flt}
-readsSpdFill :: ReadS Texture
-readsSpdFill s = [(\ri->Material clr ks (1-trans) ior kd 0.5 shine, s7) | ("f", s1)    <- lexcr s,
-                                    (clr, s2)    <- reads s1 :: [(Color,String)],
-                                    (kd, s3)     <- reads s2 :: [(Flt,String)],
-                                    (ks, s4)     <- reads s3 :: [(Flt,String)],
-                                    (shine, s5)  <- reads s4 :: [(Flt,String)],
-                                    (trans, s6)  <- reads s5 :: [(Flt,String)],
-                                    (ior, s7)    <- reads s6 :: [(Flt,String)] ]
+readsSpdFill :: ReadS (Texture () (Material ()))
+readsSpdFill s = [(\ray ri -> Surface clr (1-trans) 0 kd ks shine False, s7)
+                    | ("f", s1)    <- lexcr s,
+                      (clr, s2)    <- reads s1 :: [(Color,String)],
+                      (kd, s3)     <- reads s2 :: [(Flt,String)],
+                      (ks, s4)     <- reads s3 :: [(Flt,String)],
+                      (shine, s5)  <- reads s4 :: [(Flt,String)],
+                      (trans, s6)  <- reads s5 :: [(Flt,String)],
+                      (ior, s7)    <- reads s6 :: [(Flt,String)] ]
 
-instance Read (Rayint -> Material) where
+instance Read (Texture () (Material ())) where
  readsPrec _ = readsSpdFill
 
 
@@ -155,7 +158,7 @@ instance Read (Rayint -> Material) where
 -- vert1.x vert1.y vert1.z
 -- [etc. for total_vertices vertices]
 
-readsSpdSolid :: ReadS SolidItem
+readsSpdSolid :: ReadS SI
 readsSpdSolid s = [((sphere center radius),s3) | ("s", s1) <- lexcr s,
                                                  (center,s2) <- reads s1 :: [(Vec,String)],
                                                  (radius,s3) <- reads s2 :: [(Flt,String)] ]
@@ -182,9 +185,9 @@ readsSpdSolid s = [((sphere center radius),s3) | ("s", s1) <- lexcr s,
 
 
 -- same as readSpdVecs, just different types
-readsSpdPrims :: ReadS [SolidItem]
+readsSpdPrims :: ReadS [SI]
 readsSpdPrims s =
- let parses = readsSpdSolid s :: [(SolidItem,String)]
+ let parses = readsSpdSolid s :: [(SI,String)]
  in
  if null parses
  then [([],s)]
@@ -193,25 +196,26 @@ readsSpdPrims s =
       (vs,returns) = head (readsSpdPrims rest)
   in [((v:vs),returns)]
 
-instance Read [SolidItem] where
+instance Read [SI] where
  readsPrec _ = readsSpdPrims
 
 
-readsSpdTextureGroup :: ReadS SolidItem
+readsSpdTextureGroup :: ReadS SI
 readsSpdTextureGroup s =
- [((tex (bih prims) t),s2) | (t,s1)     <- reads s :: [(Texture,String)],
-                               (prims,s2) <- readsSpdPrims s1 :: [([SolidItem],String)] ]
+ [((tex (bih prims) t),s2)
+    | (t,s1) <- reads s :: [(Texture () (Material ()),String)],
+      (prims,s2) <- readsSpdPrims s1 :: [([SI],String)] ]
  
-instance Read SolidItem where
+instance Read SI where
  readsPrec _ = readsSpdTextureGroup
 
-accum_rss :: [Camera] -> [Light] -> [SolidItem] -> [BgColor] -> String -> ([Camera],[Light],[SolidItem],[BgColor],String)
+accum_rss :: [Camera] -> [Light] -> [SI] -> [BgColor] -> String -> ([Camera],[Light],[SI],[BgColor],String)
 accum_rss cams lights prims background s = 
   if null s
    then (cams,lights,prims,background,s)
   else
    let cam = reads s :: [(Camera,String)]
-       sld = reads s :: [(SolidItem,String)]
+       sld = reads s :: [(SI,String)]
        lit = reads s :: [(Light,String)]
        bgc = reads s :: [(BgColor,String)]
    in
@@ -237,14 +241,21 @@ accum_rss cams lights prims background s =
         else
          (cams,lights,prims,background,s)
 
-readsSpdScene :: ReadS Scene
+data SPD = SPD {
+  geom     :: SI,
+  lights   :: [Light],
+  cam      :: Camera,
+  bground  :: Color
+}
+
+readsSpdScene :: ReadS SPD
 readsSpdScene s = 
   let ((cam:cams),lights,prims,(BgColor(bgc):bgcs),s1) = accum_rss [] [] [] [] s
-  in [((scene (bih prims) lights cam t_white bgc),s1)]
+  in [((SPD (bih prims) lights cam bgc),s1)]
 
 -- | Read instance for scenes described in the Neutral File Format
 -- (NFF) used by SPD, a collection of standard benchmark scenes put
 -- together by Eric Haines.  We support most NFF features, but not
 -- all.
-instance Read Scene where
+instance Read SPD where
  readsPrec _ = readsSpdScene
