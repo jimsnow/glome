@@ -19,7 +19,14 @@ data Shader t m ctxa ctxb = Shader {
 }
 
 -- | Result of tracing a packet of 4 rays at once.
-data PacketColor = PacketColor !Color !Color !Color !Color
+type TraceResult t m = (ColorA, [t], Rayint t m)
+data PacketTraceResult t m =
+  PacketTraceResult (TraceResult t m) (TraceResult t m)
+                    (TraceResult t m) (TraceResult t m)
+
+traceMiss = (ca_transparent, [], RayMiss)
+
+packetTraceMiss = PacketTraceResult traceMiss traceMiss traceMiss traceMiss
 
 {-
 -- set rgb to normal's xyz coordinates
@@ -49,8 +56,8 @@ opaque (ColorA _ _ _ a) = a+delta >= 1
 -- to the shade routine (which may trace secondary rays of its 
 -- own), which returns a color.  For most applications, this is
 -- the entry point into the ray tracer.
-trace :: ctxa -> Shader t m ctxa ctxb -> SolidItem t m -> Ray -> Flt -> Int -> (ColorA, [t], Rayint t m)
-trace _ _ _ _ _ 0 = (ca_transparent, [], RayMiss)
+trace :: ctxa -> Shader t m ctxa ctxb -> SolidItem t m -> Ray -> Flt -> Int -> TraceResult t m
+trace _ _ _ _ _ 0 = traceMiss
 trace ctxa (Shader pre post miss) sld ray depth recurs =
   let ri  = rayint sld ray depth [] []
       ctxb = pre ctxa ray sld ri
@@ -74,50 +81,69 @@ trace ctxa (Shader pre post miss) sld ray depth recurs =
         in
           (c, ts++tags, ri)
 
-{-
--- | Similar to trace, but return depth as well as color.
--- We might want the depth for post-processing effects.
-trace_depth :: Scene -> Ray -> Flt -> Int -> (Color,Flt)
-trace_depth scn ray depth recurs =
- let (Scene sld lights cam dtex bgcolor) = scn 
-     ri = rayint sld ray depth dtex 
-     d = case ri of
-          RayHit d_ _ _ _ -> d_
-          RayMiss -> infinity
-     clr = shade ri ray scn recurs 0
- in (clr,d)
-
--- | Similar to trace, but return hit position as well as color.
-trace_pos :: Scene -> Ray -> Flt -> Int -> (Color,Vec)
-trace_pos scn ray depth recurs =
- let (Scene sld lights cam dtex bgcolor) = scn 
-     ri = rayint sld ray depth dtex 
-     p = case ri of
-          RayHit _ p _ _ -> p
-          RayMiss -> (Vec 0 0 0) -- fixme
-     clr = shade ri ray scn recurs 0
- in (clr,p)
-
 -- | A trace function which returns some additional debugging
 -- info, mainly for performance tuning.
-trace_debug :: Scene -> Ray -> Flt -> Int -> Color
-trace_debug scn ray depth recurs =
- let (Scene sld lights cam dtex bgcolor) = scn
-     (ri,n) = rayint_debug sld ray depth dtex
- in 
-  cadd (shade ri ray scn recurs 0) (Color 0 ((fromIntegral (Prelude.abs n)) * 0.01) 0)
+trace_debug :: ctxa -> Shader t m ctxa ctxb -> SolidItem t m -> Ray -> Flt -> Int -> (TraceResult t m, Int)
+trace_debug _ _ _ _ _ 0 = (traceMiss, 0)
+trace_debug ctxa (Shader pre post miss) sld ray depth recurs =
+  let (ri, dbg)  = rayint_debug sld ray depth [] []
+      ctxb = pre ctxa ray sld ri
+  in
+    case ri of
+      RayMiss -> let (c, ts) = miss ctxa ray sld in ((c, ts, ri), dbg)
+      RayHit _ _ _ _ _ texs tags ->
+        let
+          (c, ts) =
+            foldl
+              (\acc@(colora, tagsa) tex ->
+                if opaque colora
+                then acc
+                else
+                  let (colorb, tagsb) = post ctxa ctxb (tex ray ri) ray sld ri recurs
+                  in
+                     (cafold colora colorb, tagsb ++ tagsa)
+              )
+              (ca_transparent, [])
+              texs
+        in
+          ((c, ts++tags, ri), dbg)
 
 -- | Trace a packet of four rays at a time.  Sometimes, this
 -- may be a performance advantage.  However, ever since my 
 -- transition to typeclasses, this has not performed any better
 -- than the mono-ray path.
-trace_packet :: Scene -> Ray -> Ray -> Ray -> Ray -> Flt -> Int -> PacketColor
-trace_packet scn ray1 ray2 ray3 ray4 depth recurs =
- let (Scene sld lights cam dtex bgcolor) = scn
-     PacketResult ri1 ri2 ri3 ri4 = packetint sld ray1 ray2 ray3 ray4 depth dtex
- in PacketColor (shade ri1 ray1 scn recurs 0)
-                (shade ri2 ray2 scn recurs 0)
-                (shade ri3 ray3 scn recurs 0)
-                (shade ri4 ray4 scn recurs 0)
 
--}
+trace_packet :: ctxa -> Shader t m ctxa ctxb -> SolidItem t m -> Ray -> Ray -> Ray -> Ray -> Flt -> Int -> PacketTraceResult t m
+trace_packet _ _ _ _ _ _ _ _ 0 = packetTraceMiss
+trace_packet ctxa (Shader pre post miss) sld ray1 ray2 ray3 ray4 depth recurs =
+  let ri = packetint sld ray1 ray2 ray3 ray4 depth [] []
+  in
+    prMap func ri ray1 ray2 ray3 ray4
+  
+  where
+    func ray ri =
+      let ctxb = pre ctxa ray sld ri
+      in
+        case ri of
+          RayMiss -> let (c, ts) = miss ctxa ray sld in (c, ts, ri)
+          RayHit _ _ _ _ _ texs tags ->
+            let
+              (c, ts) =
+                foldl
+                  (\acc@(colora, tagsa) tex ->
+                    if opaque colora
+                    then acc
+                    else
+                      let (colorb, tagsb) = post ctxa ctxb (tex ray ri) ray sld ri recurs
+                      in
+                         (cafold colora colorb, tagsb ++ tagsa)
+                  )
+                  (ca_transparent, [])
+                  texs
+            in
+              (c, ts++tags, ri)
+
+    prMap f (PacketResult ri1 ri2 ri3 ri4) ray1 ray2 ray3 ray4 =
+      PacketTraceResult (f ray1 ri1) (f ray2 ri2) (f ray3 ri3) (f ray4 ri4)
+      
+

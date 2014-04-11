@@ -3,7 +3,7 @@
 {-# LANGUAGE FlexibleInstances #-}
 {-# LANGUAGE MultiParamTypeClasses #-}
 
-module Data.Glome.Sphere (sphere) where
+module Data.Glome.Sphere (sphere, Sphere) where
 import Data.Glome.Vec
 import Data.Glome.Solid
 

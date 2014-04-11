@@ -43,7 +43,7 @@ light pos clr = Light pos clr (\x -> 1/(x*x)) infinity True
 data Material t =
   Surface Color Flt Flt Flt Flt Flt Bool | -- color, alpha, ambient, diffuse, specular, shine, dielectric
   Reflect Flt | -- amount
-  Refract Flt Flt | -- amount, ior
+  Refract Flt Flt Flt | -- reflection, refraction, ior
   Warp (SolidItem t (Material t))
        (SolidItem t (Material t))
        [Light]
@@ -115,9 +115,44 @@ mpostshade ls lights mat ray@(Ray o dir) s rayint recurs =
                               infinity 
                               (recurs-1))
                  in (ColorA r g b (a*refl), refltags)
-            else (ca_transparent, [])
+            else (ca_black, [])
 
-          Refract _ _ -> (ca_transparent, [])
+          Refract refl refr ior ->
+            if (refl > 0 || refr > 0) && (recurs > 0)
+            then let outdir = reflect dir n
+                     (ColorA reflr reflg reflb refla, refltags, _) =
+                       (trace ls
+                              materialShader
+                              s
+                              (Ray (vscaleadd p outdir delta) outdir) 
+                              infinity
+                              (recurs-1))
+
+                     -- Formula from: http://steve.hollasch.net/cgindex/render/refraction.txt
+                     -- It seems to be sort of working, but rays seem unable to escape...
+                     eta = if (vdot n eyedir) > 0 then ior else 1/ior
+
+                     c1 = (vdot dir n)
+                     cs2 = 1 - (eta * eta) * (1 - (c1 * c1))
+                     (ColorA refrr refrg refrb refra, refrtags, _) =
+                       if cs2 < 0
+                       then (ca_black, [], raymiss)
+                       else 
+                         let t = vadd (vscale dir eta) (vscale n (eta * c1 - (sqrt cs2)))
+                         in (trace ls
+                                   materialShader
+                                   s
+                                   (Ray (vscaleadd p t delta) t)
+                                   infinity
+                                   (recurs-1))
+
+
+                 in (ColorA (reflr * refl + refrr * refr)
+                            (reflg * refl + refrg * refr)
+                            (reflb * refl + refrb * refr)
+                            (refla * refl + refra * refr), (refltags ++ refrtags))
+
+            else (ca_transparent, [])
 
           Warp frame scene' lights' xfm ->
             let (fcolor, ftags, fint) =

@@ -6,6 +6,7 @@
 {-# LANGUAGE FlexibleInstances #-}
 {-# LANGUAGE MultiParamTypeClasses #-}
 {-# LANGUAGE FunctionalDependencies #-}
+{-# LANGUAGE UndecidableInstances #-}
 
 module Data.Glome.Solid where
 import Data.Glome.Vec
@@ -297,12 +298,14 @@ group slds = SolidItem (flatten_group slds)
 -- | Smash a group of groups into a single group,
 -- so we can build an efficient bounding heirarchy
 
-flatten_group :: [SolidItem t m] -> [SolidItem t m]
+flatten_group :: Solid s t m => [s] -> [SolidItem t m]
 flatten_group slds = concat (map tolist slds)
 
 paircat :: ([a],[b]) -> ([a],[b]) -> ([a],[b])
 paircat (a1,b1) (a2,b2) = (a1++a2, b1++b2)
 
+{-
+-- Heterogeneous lists of primitives
 instance Solid [SolidItem t m] t m where
  rayint xs r d t tags              = foldl' nearest RayMiss (map (\s -> rayint s r d t tags) xs)
  packetint xs r1 r2 r3 r4 d t tags = foldl' nearest_packetresult packetmiss (map (\s -> packetint s r1 r2 r3 r4 d t tags) xs)
@@ -317,6 +320,24 @@ instance Solid [SolidItem t m] t m where
  get_metainfo xs v                 = foldl (\acc x -> if inside x v
                                                          then paircat (get_metainfo x v) acc
                                                          else acc) ([],[]) xs
+-}
+
+-- Homogeneous lists of primitives
+instance Solid s t m => Solid [s] t m where
+ rayint xs r d t tags              = foldl' nearest RayMiss (map (\s -> rayint s r d t tags) xs)
+ packetint xs r1 r2 r3 r4 d t tags = foldl' nearest_packetresult packetmiss (map (\s -> packetint s r1 r2 r3 r4 d t tags) xs)
+ rayint_debug xs r d t tags        = foldl' nearest_debug (RayMiss,0) (map (\s -> rayint_debug s r d t tags) xs)
+ shadow xs r d                     = foldl' (||) False (map (\s -> shadow s r d) xs)
+ inside xs pt                      = foldl' (||) False (map (\x -> inside x pt) xs)
+ bound xs                          = foldl' bbjoin empty_bbox (map bound xs)
+ tolist a                          = concat $ map tolist a
+ transform_leaf xs xfms            = SolidItem $ map (\x -> transform_leaf x xfms) (tolist xs)
+ flatten_transform a               = concat $ map flatten_transform a
+ primcount xs                      = foldl (pcadd) (Pcount (0,0,0)) (map primcount xs)
+ get_metainfo xs v                 = foldl (\acc x -> if inside x v
+                                                         then paircat (get_metainfo x v) acc
+                                                         else acc) ([],[]) xs
+
 
 -- VOID --
 

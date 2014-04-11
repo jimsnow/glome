@@ -339,7 +339,6 @@ vdist v1 v2 =
 -- | Reflect a vector "v" off of a surface with normal "norm".
 reflect :: Vec -> Vec -> Vec
 reflect !v !norm =
-  -- vadd v $ vscale norm $ (-2) * (vdot v norm)
   vscaleadd v norm $ (-2) * (vdot v norm)
 
 -- | Reciprocol of all fields of a Vec.
@@ -691,18 +690,17 @@ bbpts ((Vec x y z):pts) =
  Bbox (Vec minx miny minz) (Vec maxx maxy maxz)
 
 -- | Surface area of a bounding box.  Useful for cost heuristics when attempting
--- to build optimal bounding box heirarchies.  Undefined for degenerate bounding
--- boxes.
+-- to build optimal bounding box heirarchies.
 bbsa :: Bbox -> Flt
 bbsa (Bbox p1 p2) =
  let Vec dx dy dz = vsub p2 p1 
- in dx*dy + dx*dz + dy*dz
+ in max 0 $ 2*(dx*dy + dx*dz + dy*dz)
 
--- | Volume of a bounding box.  Undefined for degenerate bounding boxes.
+-- | Volume of a bounding box.
 bbvol :: Bbox -> Flt
 bbvol (Bbox p1 p2) =
  let (Vec dx dy dz) = vsub p2 p1
- in dx*dy*dz
+ in max 0 $ dx*dy*dz
 
 -- | Degenerate bounding box that contains an empty volume.
 empty_bbox :: Bbox
@@ -720,26 +718,27 @@ everything_bbox =
 -- box.  If last entrance is before the first exit,
 -- we hit.  Otherwise, we miss. (It's up to the 
 -- caller to figure that out.)
+-- The "rcp" version takes the direction as a recpirocal vector.
+-- (If you have to do a lot of tests, this is cheaper than
+-- doing the division many times.)
 
-{-
-bbclip :: Ray -> Bbox -> Interval
-bbclip (Ray (Vec ox oy oz) (Vec dx dy dz)) 
-       (Bbox (Vec p1x p1y p1z) (Vec p2x p2y p2z)) =
- let !dxrcp = 1/dx
-     !dyrcp = 1/dy
-     !dzrcp = 1/dz
-     Interval !inx !outx = if dx > 0 
-                           then Interval ((p1x-ox)*dxrcp) ((p2x-ox)*dxrcp)
-                           else Interval ((p2x-ox)*dxrcp) ((p1x-ox)*dxrcp)
-     Interval !iny !outy = if dy > 0
-                           then Interval ((p1y-oy)*dyrcp) ((p2y-oy)*dyrcp)
-                           else Interval ((p2y-oy)*dyrcp) ((p1y-oy)*dyrcp)
-     Interval !inz !outz = if dz > 0
-                           then Interval ((p1z-oz)*dzrcp) ((p2z-oz)*dzrcp)
-                           else Interval ((p2z-oz)*dzrcp) ((p1z-oz)*dzrcp)
+bbclip_ub_rcp :: Ray -> Bbox -> (# Flt, Flt #)
+bbclip_ub_rcp (Ray (Vec !ox !oy !oz) (Vec !dxrcp !dyrcp !dzrcp)) 
+              (Bbox (Vec !p1x !p1y !p1z) (Vec !p2x !p2y !p2z)) =
+ let (# !inx, !outx #) =
+       if dxrcp > 0 
+       then (# (p1x-ox)*dxrcp, (p2x-ox)*dxrcp #)
+       else (# (p2x-ox)*dxrcp, (p1x-ox)*dxrcp #)
+     (# !iny, !outy #) =
+       if dyrcp > 0
+       then (# (p1y-oy)*dyrcp, (p2y-oy)*dyrcp #)
+       else (# (p2y-oy)*dyrcp, (p1y-oy)*dyrcp #)
+     (# !inz, !outz #) =
+       if dzrcp > 0
+       then (# (p1z-oz)*dzrcp, (p2z-oz)*dzrcp #)
+       else (# (p2z-oz)*dzrcp, (p1z-oz)*dzrcp #)
  in
-   Interval (fmax3 inx iny inz) (fmin3 outx outy outz)
--}
+   (# fmax3 inx iny inz, fmin3 outx outy outz #)
 
 bbclip_ub :: Ray -> Bbox -> (# Flt, Flt #)
 bbclip_ub (Ray (Vec !ox !oy !oz) (Vec !dx !dy !dz)) 

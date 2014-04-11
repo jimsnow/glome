@@ -1,7 +1,7 @@
 {-# LANGUAGE FlexibleInstances #-}
 {-# LANGUAGE MultiParamTypeClasses #-}
 
-module Data.Glome.Triangle (triangle, triangles, trianglenorm, trianglesnorms) where
+module Data.Glome.Triangle (Triangle(..), triangle, triangle_raw, triangles, trianglenorm, TriangleNorm(..), trianglesnorms, rayint_triangle, rayint_trianglenorm) where
 import Data.Glome.Vec
 import Data.Glome.Solid
 
@@ -18,6 +18,11 @@ data TriangleNorm t m = TriangleNorm Vec Vec Vec Vec Vec Vec deriving Show
 triangle :: Vec -> Vec -> Vec -> SolidItem t m
 triangle v1 v2 v3 =
  SolidItem (Triangle v1 v2 v3)
+
+-- | Create a simple triangle from its 3 corners.
+-- The normals are computed automatically.
+triangle_raw :: Vec -> Vec -> Vec -> Triangle t m
+triangle_raw = Triangle
 
 -- | Create a triangle fan from a list of verticies.
 triangles :: [Vec] -> [SolidItem t m]
@@ -44,28 +49,35 @@ rayint_triangle (Triangle p1 p2 p3) ray@(Ray o dir) dist tex tags =
      s1 = vcross dir e2
      divisor = vdot s1 e1
  in 
-   if (divisor == 0)
+   if divisor == 0
    then RayMiss
    else
      let invdivisor = 1.0 / divisor
          d = vsub o p1 
          b1 = (vdot d s1) * invdivisor
      in
-       if (b1 < 0) || (b1 > 1) 
+       if b1 < 0 || b1 > 1
        then RayMiss 
        else
          let s2 = vcross d e1
              b2 = (vdot dir s2) * invdivisor
          in
-           if (b2 < 0) || (b1 + b2 > 1) 
+           if b2 < 0 || b1 + b2 > 1
            then RayMiss
            else
              let t = (vdot e2 s2) * invdivisor
            in
-             if (t < 0) || (t > dist)
+             if t < 0 || t > dist
              then RayMiss
              else
-               RayHit t (vscaleadd o dir t) (vnorm (vcross e1 e2)) ray vzero tex tags
+               RayHit t (vscaleadd o dir t) (vnorm $ vcross e1 e2) ray vzero tex tags
+
+packetint_triangle :: Triangle tag mat -> Ray -> Ray -> Ray -> Ray -> Flt -> [Texture tag mat] -> [tag] -> PacketResult tag mat
+packetint_triangle tri ray1 ray2 ray3 ray4 dist tex tags =
+  PacketResult (rayint_triangle tri ray1 dist tex tags)
+               (rayint_triangle tri ray2 dist tex tags)
+               (rayint_triangle tri ray3 dist tex tags)
+               (rayint_triangle tri ray4 dist tex tags)
 
 shadow_triangle :: Triangle tag mat -> Ray -> Flt -> Bool
 shadow_triangle (Triangle p1 p2 p3) (Ray o dir) dist =
@@ -166,6 +178,7 @@ transform_trianglenorm (TriangleNorm p1 p2 p3 n1 n2 n3) xfms =
 
 instance Solid (Triangle t m) t m where
  rayint = rayint_triangle
+ packetint = packetint_triangle
  shadow = shadow_triangle
  inside _ _ = False
  bound = bound_triangle

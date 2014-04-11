@@ -1,7 +1,7 @@
 {-# LANGUAGE FlexibleInstances #-}
 {-# LANGUAGE MultiParamTypeClasses #-}
 
-module Data.Glome.Bound (bound_object) where
+module Data.Glome.Bound (bound_object, innerbound) where
 import Data.Glome.Vec
 import Data.Glome.Solid
 
@@ -24,7 +24,6 @@ data Bound t m = Bound (SolidItem t m) (SolidItem t m) deriving Show
 -- miss the second object.  Used primarily to improve performance.
 -- In general, bih will usually perform better than 
 -- manually-constructed bounds, though.
-
 bound_object :: SolidItem t m -> SolidItem t m -> SolidItem t m
 bound_object a b = SolidItem $ Bound a b
 
@@ -87,3 +86,32 @@ instance Solid (Bound t m) t m where
  transform_leaf = transform_leaf_bound
  primcount = primcount_bound
  get_metainfo = get_metainfo_bound
+
+-- | An InnerBound is the opposite of a Bound; an inner bounding object is
+-- entirely inside another.  By tracing against the inner object first, we can
+-- get a better idea of the depth we need to trace.
+-- This may not interact well with CSG.
+
+data InnerBound t m = InnerBound (SolidItem t m) (SolidItem t m) deriving Show
+
+rayint_innerbound :: InnerBound tag mat -> Ray -> Flt -> [Texture tag mat] -> [tag] -> Rayint tag mat
+rayint_innerbound (InnerBound sa sb) r d t tags =
+  rayint sb r (ridepth (rayint sa r d [] [])) t tags
+
+shadow_innerbound :: InnerBound t m -> Ray -> Flt -> Bool
+shadow_innerbound (InnerBound sa sb) r d =
+  (shadow sa r d) || (shadow sb r d) 
+
+instance Solid (InnerBound t m) t m where
+  rayint = rayint_innerbound
+  rayint_debug (InnerBound sa sb) = rayint_debug sb
+  shadow = shadow_innerbound
+  inside (InnerBound sa sb) v = inside sa v || inside sb v
+  bound (InnerBound sa sb) = bound sb
+  flatten_transform (InnerBound sa sb) = flatten_transform sb
+  transform_leaf (InnerBound sa sb) = transform_leaf sb
+  primcount (InnerBound sa sb) = pcadd (asbound (primcount sa)) (primcount sb)
+  get_metainfo (InnerBound sa sb) = get_metainfo sb
+
+innerbound sa sb = SolidItem $ InnerBound sa sb
+

@@ -1,5 +1,5 @@
 Name:                GlomeVec
-Version:             0.2
+Version:             0.3.1
 Synopsis:            Simple 3D vector library
 Description:         A simple library for dealing with 3D vectors, suitable for graphics projects.  A small texture library with Perlin noise is included as well.
 License:             GPL

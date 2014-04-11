@@ -1,5 +1,5 @@
 Name:                GlomeView
-Version:             0.3
+Version:             0.3.1
 Synopsis:            SDL Frontend for Glome ray tracer
 Description:         Ray Tracer capable of rendering a variety of primitives,
                      with support for CSG (difference and intersection of solids),
@@ -23,4 +23,4 @@ Executable Glome
   Main-Is:        Glome.hs
   ghc-options: -O2 -threaded
   extensions:          BangPatterns
-  Build-Depends:       base >= 4 && < 5, time, monad-par, deepseq, random, vector, GlomeVec >= 0.2, GlomeTrace >= 0.2, SDL
+  Build-Depends:       base >= 4 && < 5, time, monad-par, deepseq, random, vector, GlomeVec >= 0.3.1, GlomeTrace >= 0.3.1, SDL

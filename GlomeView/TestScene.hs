@@ -193,6 +193,7 @@ geom'' =
                                            scale (vec 3 3 3) ]) (sphere (vec 0 0 0) 32)) t_shiny_red
    , transform (portal 5 2 (1/3)) [ rotate vy (deg 8)
                                   , translate (vec (-3) 0.5 (-5))]
+   , transform (tex (sphere (Vec (-2.3) 0.3 (4.2)) 1.7) (t_uniform $ Refract 0.35 0.8 1.5)) [scale (vec 1 0.4 1) ]
    ]
 
 

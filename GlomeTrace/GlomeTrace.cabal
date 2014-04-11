@@ -1,5 +1,5 @@
 Name:                GlomeTrace
-Version:             0.3
+Version:             0.3.1
 Synopsis:            Ray Tracing Library
 Description:         A ray tracing library with acceleration structure and many supported primitives.
 License:             GPL
@@ -24,6 +24,7 @@ library
                      Data.Glome.Solid
                      Data.Glome.Spd
                      Data.Glome.Bih
+                     Data.Glome.Mesh
                      Data.Glome.Bound
                      Data.Glome.Box
                      Data.Glome.Cone
@@ -34,4 +35,4 @@ library
                      Data.Glome.Triangle
                      Data.Glome.Shader
 
-  Build-Depends:     base >= 4 && < 5, array, GlomeVec >= 0.2
+  Build-Depends:     base >= 4 && < 5, array, GlomeVec >= 0.3.1, monad-par, deepseq, vector

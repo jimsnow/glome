@@ -21,7 +21,8 @@ data Intersection t m = Intersection [SolidItem t m] deriving Show
 -- volume, so subtracting them from anything won't do anything.
 --
 -- If you use the "retexture" constructor, the surface hollowed
--- out by B will be rendered with B's texture,
+-- out by B will be rendered with B's texture, instead of A's texture.
+
 difference :: SolidItem t m -> SolidItem t m -> SolidItem t m
 difference a b = SolidItem $ Difference a b True
 
